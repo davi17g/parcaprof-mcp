@@ -1,0 +1,75 @@
+name: Publish Docker image
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag (without leading 'v'). Defaults to the short commit SHA."
+        required: false
+        default: ""
+      tag-latest:
+        description: "Also tag as :latest"
+        required: false
+        default: "false"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_REPO: davi17g/parcaprof-mcp
+      REGISTRY: docker.io
+    steps:
+      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Resolve image tag and version
+        id: meta
+        env:
+          DISPATCH_TAG: ${{ inputs.tag }}
+          DISPATCH_LATEST: ${{ inputs.tag-latest }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME}"
+            IMAGE_TAG="${GITHUB_REF_NAME#v}"
+            TAG_LATEST="true"
+          else
+            VERSION="$(git describe --tags --always --dirty)"
+            IMAGE_TAG="${DISPATCH_TAG:-$(git rev-parse --short HEAD)}"
+            TAG_LATEST="${DISPATCH_LATEST:-false}"
+          fi
+          {
+            echo "VERSION=${VERSION}"
+            echo "IMAGE_TAG=${IMAGE_TAG}"
+            echo "TAG_LATEST=${TAG_LATEST}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push multi-arch image
+        run: |
+          make docker-buildx \
+            IMAGE_REPO=${{ env.IMAGE_REPO }} \
+            IMAGE_TAG=${{ steps.meta.outputs.IMAGE_TAG }} \
+            IMAGE_TAG_LATEST=${{ steps.meta.outputs.TAG_LATEST }} \
+            REGISTRY=${{ env.REGISTRY }} \
+            VERSION=${{ steps.meta.outputs.VERSION }} \
+            ARCHS="linux/amd64 linux/arm64" \
+            IMAGE_OUTPUT="type=image,push=true"
