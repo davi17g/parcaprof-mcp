@@ -1,4 +1,4 @@
-go through the SHELL = bash
+SHELL = bash
 NAME = parcaprof-mcp
 WORKSPACE = $(shell pwd)
 VERSION ?= $(shell git describe --tags --exact-match 2>/dev/null || git rev-parse --abbrev-ref HEAD 2>/dev/null || echo dev)
