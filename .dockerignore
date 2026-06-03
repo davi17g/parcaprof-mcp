@@ -1,0 +1,8 @@
+.git
+.gitignore
+.dockerignore
+bin/
+dist/
+coverage.cov
+*.cov
+README.md

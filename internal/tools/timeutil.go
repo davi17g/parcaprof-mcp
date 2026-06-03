@@ -43,7 +43,7 @@ func ParseTime(s string, now time.Time) (time.Time, error) {
 }
 
 // Window parses a start/end pair with a sensible default of "last 15 minutes" if both empty.
-func Window(start, end string) (*timestamppb.Timestamp, *timestamppb.Timestamp, error) {
+func Window(start, end string) (startPB, endPB *timestamppb.Timestamp, err error) {
 	now := time.Now()
 	s, err := ParseTime(start, now)
 	if err != nil {
@@ -53,12 +53,13 @@ func Window(start, end string) (*timestamppb.Timestamp, *timestamppb.Timestamp, 
 	if err != nil {
 		return nil, nil, err
 	}
-	if s.IsZero() && e.IsZero() {
+	switch {
+	case s.IsZero() && e.IsZero():
 		s = now.Add(-15 * time.Minute)
 		e = now
-	} else if s.IsZero() {
+	case s.IsZero():
 		s = e.Add(-15 * time.Minute)
-	} else if e.IsZero() {
+	case e.IsZero():
 		e = now
 	}
 	return timestamppb.New(s), timestamppb.New(e), nil

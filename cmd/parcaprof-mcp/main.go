@@ -2,19 +2,27 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	parcaclient "github.com/davi17g/parcaprof-mcp/internal/parca"
 	"github.com/davi17g/parcaprof-mcp/internal/tools"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const version = "0.1.0"
+// Set via -ldflags at build time (see Makefile).
+var (
+	appVersion = "dev"
+	commitHash = "none"
+	buildTime  = "unknown"
+)
 
 func main() {
 	var (
@@ -22,8 +30,14 @@ func main() {
 		parcaInsec  = flag.Bool("parca-insecure", false, "use plaintext (no TLS) when connecting to Parca")
 		transport   = flag.String("transport", "http", "MCP transport: 'http' (Streamable HTTP + SSE) or 'stdio'")
 		httpAddr    = flag.String("http-addr", ":8080", "HTTP listen address (transport=http)")
+		showVersion = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("parcaprof-mcp %s\ncommit:  %s\nbuilt:   %s\n", appVersion, commitHash, buildTime)
+		return
+	}
 
 	cfg := parcaclient.Config{
 		Address:     *parcaAddr,
@@ -34,19 +48,18 @@ func main() {
 	if err != nil {
 		log.Fatalf("parca: %v", err)
 	}
-	defer pc.Close()
-
-	srv := mcp.NewServer(&mcp.Implementation{Name: "parcaprof-mcp", Version: version}, nil)
+	srv := mcp.NewServer(&mcp.Implementation{Name: "parcaprof-mcp", Version: appVersion}, nil)
 	tools.Register(srv, pc)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
+	exitCode := 0
 	switch *transport {
 	case "stdio":
-		log.Printf("parcaprof-mcp %s: stdio transport, parca=%s", version, *parcaAddr)
+		log.Printf("parcaprof-mcp %s: stdio transport, parca=%s", appVersion, *parcaAddr)
 		if err := srv.Run(ctx, &mcp.StdioTransport{}); err != nil {
-			log.Fatalf("mcp stdio: %v", err)
+			log.Printf("mcp stdio: %v", err)
+			exitCode = 1
 		}
 	case "http":
 		getSrv := func(*http.Request) *mcp.Server { return srv }
@@ -56,16 +69,27 @@ func main() {
 		mux.Handle("/sse", mcp.NewSSEHandler(getSrv, nil))
 		mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 
-		hsrv := &http.Server{Addr: *httpAddr, Handler: mux}
+		hsrv := &http.Server{
+			Addr:              *httpAddr,
+			Handler:           mux,
+			ReadHeaderTimeout: 10 * time.Second,
+		}
 		go func() {
 			<-ctx.Done()
 			_ = hsrv.Shutdown(context.Background())
 		}()
-		log.Printf("parcaprof-mcp %s: http on %s (/mcp streamable, /sse legacy), parca=%s", version, *httpAddr, *parcaAddr)
-		if err := hsrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("http: %v", err)
+		log.Printf("parcaprof-mcp %s: http on %s (/mcp streamable, /sse legacy), parca=%s", appVersion, *httpAddr, *parcaAddr)
+		if err := hsrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("http: %v", err)
+			exitCode = 1
 		}
 	default:
-		log.Fatalf("unknown transport %q (want 'http' or 'stdio')", *transport)
+		log.Printf("unknown transport %q (want 'http' or 'stdio')", *transport)
+		exitCode = 2
+	}
+	stop()
+	pc.Close()
+	if exitCode != 0 {
+		os.Exit(exitCode)
 	}
 }
