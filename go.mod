@@ -6,7 +6,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/parca-dev/parca v0.28.0
 	google.golang.org/grpc v1.81.1
-	google.golang.org/protobuf v1.36.11
+	google.golang.org/protobuf v1.36.12
 )
 
 require (
